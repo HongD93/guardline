@@ -1,0 +1,28 @@
+:root {
+  /* 색상 - 브랜드 (경고 등급 표현에 그대로 쓴다) */
+  --personal-color-red: #ef5350;
+  --personal-color-red-dark: #d32f2f;
+  --personal-color-red-soft: #fdecea;
+
+  /* 색상 - 중립 */
+  --personal-color-white: #ffffff;
+  --personal-color-gray-100: #f5f6f7;
+  --personal-color-gray-300: #dcdfe3;
+  --personal-color-gray-600: #666666;
+  --personal-color-black: #000000;
+
+  /* 모서리 */
+  --personal-radius: 5px;
+  --personal-radius-card: 15px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--personal-color-gray-100);
+  color: var(--personal-color-black);
+  font-family: 'Pretendard', -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
+}
