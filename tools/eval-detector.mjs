@@ -4,6 +4,9 @@
 // 프롬프트를 고칠 때마다 몇 분 안에 전수 검증을 돌릴 수 있다. 실제 STT 결과는 거의 원문과
 // 같으므로(1주차 검증) 프롬프트 반복에는 이 방식으로 충분하다.
 //
+// 이 하네스는 LLM 감지만 측정한다. 실제 시스템은 여기에 규칙 기반 감지(KeywordSignalDetector)를
+// 합집합으로 얹으므로 항상 이 결과보다 좋다. 즉 여기 수치는 하한선이다.
+//
 //   node tools/eval-detector.mjs            전체
 //   node tools/eval-detector.mjs F1         id에 F1이 포함된 것만
 import { readFileSync } from 'node:fs';

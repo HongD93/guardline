@@ -97,14 +97,26 @@ class KeywordSignalDetectorTest {
     }
 
     @Test
-    @DisplayName("정상 통화를 격리 유도로 잘못 잡지 않는다")
-    void 정상통화는_격리유도가_아니다() {
+    @DisplayName("정상 카드사 통화는 기관 소개(S1)만 잡고 위험 단계는 잡지 않는다")
+    void 정상통화는_S1까지만_잡는다() {
         List<String> lines = List.of(
                 "안녕하세요 고객님 오오카드 이상거래탐지팀 김서연입니다",
                 "해당 건은 승인 거절 처리되었고 카드는 현재 일시 정지 상태입니다",
                 "지금 추가로 진행하실 부분은 없습니다");
 
-        assertThat(stageIds(lines)).isEmpty();
+        assertThat(stageIds(lines)).containsExactly("S1");
+        assertThat(stageIds(lines)).doesNotContain("S3");
+    }
+
+    @Test
+    @DisplayName("기관 사칭과 공포 조성을 규칙으로 잡는다")
+    void 기관사칭과_공포조성을_잡는다() {
+        List<String> lines = List.of(
+                "서울중앙지검 첨단범죄수사부 김민수 수사관입니다",
+                "홍길동 씨 명의로 개설된 대포통장이 자금세탁 사건에 사용된 정황이 확인됐습니다",
+                "현재 피의자 신분으로 조사 대상에 올라 있습니다");
+
+        assertThat(stageIds(lines)).contains("S1", "S2");
     }
 
     @Test

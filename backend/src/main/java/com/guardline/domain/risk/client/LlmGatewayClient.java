@@ -13,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -63,15 +64,50 @@ public class LlmGatewayClient {
             각 항목마다 다음 한 줄로 답하세요. 다른 말은 쓰지 마세요.
             <항목ID>|<yes 또는 no>|<0.0~1.0 확신도>|<근거 문장 원문 그대로, 없으면 - >
 
-            예시:
-            S1|yes|0.9|서울중앙지검 김민수 수사관입니다
-            S2|no|0.0|-
+            [예시 1] 사기 통화
+            입력: 서울중앙지검 김민수 수사관입니다 / 명의도용 정황이 확인됐습니다 /
+                  가족분께도 절대 말씀하시면 안 됩니다 / 국가안전계좌로 이체해 주시면
+            출력:
+            S1|yes|0.95|서울중앙지검 김민수 수사관입니다
+            S2|yes|0.9|명의도용 정황이 확인됐습니다
+            S3|yes|0.95|가족분께도 절대 말씀하시면 안 됩니다
+            S4|no|0.0|-
+            S5|yes|0.9|국가안전계좌로 이체해 주시면
+            N1|no|0.0|-
+            N2|no|0.0|-
+            N4|no|0.0|-
+
+            [예시 2] 정상 카드사 통화 - S1·S2를 밟지만 감점 신호가 함께 나온다
+            입력: OO카드 이상거래탐지팀 김서연입니다 / 고객님 명의 카드로 해외 결제 시도가
+                  있었습니다 / 앱에서 직접 신청하시거나 대표번호로 연락 주세요 /
+                  천천히 확인해 보시고 진행하세요
+            출력:
+            S1|yes|0.9|OO카드 이상거래탐지팀 김서연입니다
+            S2|yes|0.8|고객님 명의 카드로 해외 결제 시도가 있었습니다
+            S3|no|0.0|-
+            S4|no|0.0|-
+            S5|no|0.0|-
+            N1|yes|0.9|천천히 확인해 보시고 진행하세요
+            N2|yes|0.9|앱에서 직접 신청하시거나 대표번호로 연락 주세요
+            N4|no|0.0|-
             """;
 
     private static final Pattern LINE = Pattern.compile("^(S[1-5]|N[124])\\|(yes|no)\\|([\\d.]+)\\|(.*)$");
 
     /** 이 확신도 미만은 버린다. 소형 모델이 애매한 항목에 0.5를 주고 yes로 표시하는 경향이 있다. */
     private static final double MIN_CONFIDENCE = 0.6;
+
+    /**
+     * 429를 맞은 뒤 다음 호출까지 쉬는 시간.
+     *
+     * <p>무료 계정 리밋을 실측한 값이다 - 연속 버스트는 2회까지, 429 이후 회복까지 약 30초.
+     * 10초 주기로 호출하면 절반이 429로 버려진다. 쉬는 동안에도 규칙 기반 감지는 매 회차
+     * 돌기 때문에 화면 갱신이 멈추지는 않는다.
+     */
+    private static final long COOLDOWN_MS = 30_000;
+
+    /** 쿨다운 해제 시각. 세션이 여러 개여도 리밋은 계정 단위라 인스턴스 하나로 관리한다. */
+    private volatile long cooldownUntil = 0;
 
     private final AssemblyAiProperties assemblyAiProperties;
     private final LlmProperties llmProperties;
@@ -109,6 +145,12 @@ public class LlmGatewayClient {
      * @return 감지 실패 시 빈 결과. 판정 한 회차를 건너뛸 뿐 통화 감시는 계속돼야 한다.
      */
     public SignalDetectionResult detect(List<String> recentLines) {
+        long now = System.currentTimeMillis();
+        if (now < cooldownUntil) {
+            log.debug("레이트 리밋 쿨다운 중. {}ms 남음. 이번 회차는 규칙 감지만 쓴다.", cooldownUntil - now);
+            return SignalDetectionResult.empty();
+        }
+
         String userPrompt = "[통화 내용]\n" + String.join("\n", recentLines);
 
         Map<String, Object> body = Map.of(
@@ -131,6 +173,10 @@ public class LlmGatewayClient {
                     .body(String.class);
 
             return parse(response, recentLines);
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            cooldownUntil = System.currentTimeMillis() + COOLDOWN_MS;
+            log.info("레이트 리밋(429). {}초간 LLM 호출을 쉬고 규칙 감지로 버틴다.", COOLDOWN_MS / 1000);
+            return SignalDetectionResult.empty();
         } catch (Exception e) {
             // 한 회차를 건너뛸 뿐 통화 감시는 계속돼야 한다. 모델 ID 오타처럼 매번 실패하는
             // 설정 문제를 바로 알아볼 수 있도록 모델명을 함께 남긴다.
