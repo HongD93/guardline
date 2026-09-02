@@ -2,6 +2,7 @@ package com.guardline.domain.call.client;
 
 import tools.jackson.databind.ObjectMapper;
 import com.guardline.global.config.AssemblyAiProperties;
+import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
@@ -36,9 +37,13 @@ public class AssemblyAiStreamClient {
 
         AssemblyAiConnection connection = new AssemblyAiConnection(objectMapper, listener);
 
-        log.info("업스트림 STT 연결 시도: {}", properties.endpoint());
+        // API 키는 헤더에만 실리므로 URI 전체를 남겨도 안전하다. 어떤 파라미터가 실제로
+        // 나갔는지 봐야 인식 품질 문제를 설정 탓인지 오디오 탓인지 가를 수 있다.
+        URI uri = properties.buildUri();
+        log.info("업스트림 STT 연결 시도: {}", uri);
+
         new StandardWebSocketClient()
-                .execute(connection, headers, properties.buildUri())
+                .execute(connection, headers, uri)
                 .get(CONNECT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
         return connection;

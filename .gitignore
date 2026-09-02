@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+application-local.yaml
+backend/application-local.yaml
 backend/src/main/resources/application-local.yaml
 
 # Gradle

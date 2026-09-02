@@ -77,8 +77,24 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        log.info("업스트림 연결 종료: {} {}", status.getCode(), status.getReason());
-        listener.onEvent(TranscriptEventResponseDTO.closed("업스트림 연결 종료 (%d)".formatted(status.getCode())));
+        String reason = describeCloseCode(status.getCode());
+        log.info("업스트림 연결 종료: {} {} ({})", status.getCode(), status.getReason(), reason);
+        listener.onEvent(TranscriptEventResponseDTO.closed("업스트림 연결 종료 (%d) - %s"
+                .formatted(status.getCode(), reason)));
+    }
+
+    /** 공식 지침이 정의한 종료 코드. 원인을 바로 알 수 있어야 디버깅에서 헤매지 않는다. */
+    private static String describeCloseCode(int code) {
+        return switch (code) {
+            case 1000 -> "정상 종료";
+            case 1008 -> "인증 실패 - API 키 또는 토큰 확인";
+            case 3005 -> "서버가 세션을 취소함";
+            case 3006 -> "잘못된 메시지 타입 또는 JSON";
+            case 3007 -> "오디오 청크가 50~1000ms 범위를 벗어났거나 실시간보다 빠르게 전송됨";
+            case 3008 -> "세션 3시간 상한 도달";
+            case 3009 -> "동시 세션 수 초과";
+            default -> "정의되지 않은 종료 코드";
+        };
     }
 
     /** PCM16 오디오 청크를 업스트림으로 넘긴다. */

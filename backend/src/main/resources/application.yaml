@@ -1,6 +1,9 @@
 spring:
   application:
     name: guardline
+  config:
+    # 로컬 시크릿은 커밋되지 않는 backend/application-local.yaml로 분리한다. 없으면 무시된다.
+    import: optional:file:./application-local.yaml
 
 server:
   port: 8080
@@ -11,8 +14,13 @@ guardline:
     endpoint: wss://streaming.assemblyai.com/v3/ws
     # 프론트가 리샘플해 보내는 값과 반드시 같아야 한다. 바꾸면 프론트 상수도 함께 바꾼다.
     sample-rate: 16000
-    encoding: pcm_s16le
-    speech-model: ${ASSEMBLYAI_SPEECH_MODEL:}
+    # 스트리밍 기본값이 PCM16 LE 모노다. 공식 예제도 싣지 않으므로 비워둔다.
+    encoding: ${ASSEMBLYAI_ENCODING:}
+    # universal-3-5-pro는 한국어를 지원하지 않는다(18개 언어에 ko 없음). 한국어 오디오를 넣으면
+    # 중국어·일본어·힌디어 등 아는 언어로 매핑해버린다. whisper-rt만 한국어를 지원한다.
+    speech-model: ${ASSEMBLYAI_SPEECH_MODEL:whisper-rt}
+    # whisper-rt는 언어 파라미터를 받지 않고 자동 감지한다. 비워둔다.
+    language-code: ${ASSEMBLYAI_LANGUAGE_CODE:}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5175}
 
