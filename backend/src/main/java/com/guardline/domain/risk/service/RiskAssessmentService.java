@@ -68,9 +68,17 @@ public class RiskAssessmentService {
         }
     }
 
-    public void end(String sessionId) {
-        CallState state = calls.remove(sessionId);
+    /**
+     * 통화 종료. 주기 작업을 멈추기 전에 마지막 판정을 한 번 더 돌린다.
+     *
+     * <p>통화 막바지 문장이 주기 사이에 들어오면 반영되지 않은 채 끝난다. 감점 신호는 보통
+     * 통화 끝에 나오므로(정상 상담원이 마지막에 "공식 앱에서 확인하세요"라고 안내), 이 마지막
+     * 판정이 없으면 정상 통화가 주의 등급으로 끝나버린다.
+     */
+    public void end(String sessionId, Runnable onComplete) {
+        CallState state = calls.get(sessionId);
         if (state == null) {
+            onComplete.run();
             return;
         }
         synchronized (state) {
@@ -78,7 +86,16 @@ public class RiskAssessmentService {
                 state.pending.cancel(false);
             }
         }
-        log.info("판정 세션 종료: {}", sessionId);
+        // 판정은 LLM 호출이라 오래 걸린다. 호출 스레드(WebSocket 종료 처리)를 막지 않는다.
+        scheduler.execute(() -> {
+            try {
+                assess(sessionId);
+            } finally {
+                calls.remove(sessionId);
+                log.info("판정 세션 종료: {}", sessionId);
+                onComplete.run();
+            }
+        });
     }
 
     private void assess(String sessionId) {

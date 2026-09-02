@@ -9,6 +9,9 @@ const CHUNK_INTERVAL_MS = (CHUNK_SAMPLES / TARGET_SAMPLE_RATE) * 1000;
 /** 업스트림이 허용하는 최소 청크 길이 50ms. 이보다 짧게 보내면 종료 코드 3007로 끊긴다. */
 const MIN_CHUNK_SAMPLES = TARGET_SAMPLE_RATE * 0.05;
 
+/** stop 이후 서버가 마지막 판정을 마치고 소켓을 닫아줄 때까지의 최대 대기. */
+const FINAL_ASSESSMENT_WAIT_MS = 20000;
+
 /**
  * 브라우저 오디오를 릴레이로 흘려보내고 전사 이벤트를 받는다.
  *
@@ -244,11 +247,18 @@ export function useCallStream() {
   const stop = async () => {
     generation += 1; // 진행 중인 재생 루프를 전부 무효화한다
 
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'stop' }));
-      socket.close();
-    }
+    const closing = socket;
     socket = null;
+
+    if (closing?.readyState === WebSocket.OPEN) {
+      // 소켓을 바로 닫지 않는다. 서버가 마지막 판정을 마치고 결과를 보낸 뒤 닫아준다.
+      // 감점 신호는 통화 끝에 나오는 경우가 많아 이 마지막 결과를 놓치면 등급이 뒤집힌다.
+      closing.send(JSON.stringify({ type: 'stop' }));
+      const fallback = setTimeout(() => closing.close(), FINAL_ASSESSMENT_WAIT_MS);
+      closing.addEventListener('close', () => clearTimeout(fallback), { once: true });
+    } else {
+      closing?.close();
+    }
 
     micStream?.getTracks().forEach((track) => track.stop());
     micStream = null;

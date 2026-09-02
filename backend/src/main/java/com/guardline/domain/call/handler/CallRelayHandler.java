@@ -85,6 +85,7 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        // 이미 stopUpstream을 거쳤으면 세션이 없으므로 그대로 통과한다.
         stopUpstream(session.getId());
         browserSessions.remove(session.getId());
         log.info("브라우저 연결 종료: {} ({})", session.getId(), status.getCode());
@@ -107,12 +108,29 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
         upstreams.put(sessionId, connection);
     }
 
+    /**
+     * 업스트림을 끊고 마지막 판정까지 마친 뒤 브라우저 세션을 닫는다.
+     *
+     * <p>브라우저가 stop을 보내자마자 소켓을 닫아버리면 마지막 판정 결과가 도착할 곳이 없다.
+     * 감점 신호는 보통 통화 끝에 나오므로 그 결과를 놓치면 정상 통화가 주의 등급으로 끝난다.
+     */
     private void stopUpstream(String sessionId) {
-        riskAssessmentService.end(sessionId);
-
         AssemblyAiConnection upstream = upstreams.remove(sessionId);
         if (upstream != null) {
             upstream.terminate();
+        }
+        riskAssessmentService.end(sessionId, () -> closeBrowserSession(sessionId));
+    }
+
+    private void closeBrowserSession(String sessionId) {
+        WebSocketSession session = browserSessions.remove(sessionId);
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        try {
+            session.close(CloseStatus.NORMAL);
+        } catch (IOException e) {
+            log.warn("브라우저 세션 종료 실패: {}", sessionId, e);
         }
     }
 

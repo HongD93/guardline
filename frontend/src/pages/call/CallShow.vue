@@ -1,12 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import CallControls from '../../components/call/CallControls.vue';
+import InterventionPanel from '../../components/risk/InterventionPanel.vue';
 import RiskGauge from '../../components/risk/RiskGauge.vue';
 import SignalPanel from '../../components/risk/SignalPanel.vue';
 import TranscriptPanel from '../../components/transcript/TranscriptPanel.vue';
 import { useCallStream } from '../../composables/useCallStream.js';
+import { useIntervention } from '../../composables/useIntervention.js';
 
 const { status, finalTurns, partialText, errorMessage, risk, startMic, playScenario, stop } = useCallStream();
+const intervention = useIntervention(risk);
 
 const scenarios = ref([]);
 const audioByScenario = ref({});
@@ -48,8 +51,19 @@ const loadScenarios = async () => {
 const handlePlay = () => {
   const urls = audioByScenario.value[selectedId.value];
   if (urls?.length) {
+    intervention.reset(); // 이전 통화의 경고 상태를 지운다
     playScenario(urls, selected.value?.inbound ?? true);
   }
+};
+
+const handleMic = () => {
+  intervention.reset();
+  startMic();
+};
+
+const handleStop = () => {
+  intervention.reset();
+  stop();
 };
 
 onMounted(loadScenarios);
@@ -70,8 +84,16 @@ onUnmounted(stop);
       :error-message="displayError"
       @update:selected-id="selectedId = $event"
       @play="handlePlay"
-      @mic="startMic"
-      @stop="stop"
+      @mic="handleMic"
+      @stop="handleStop"
+    />
+
+    <InterventionPanel
+      :active="intervention.spoken.value"
+      :guardian-notified="intervention.guardianNotified.value"
+      :notified-at="intervention.notifiedAt.value"
+      :speech-blocked="intervention.speechBlocked.value"
+      @replay="intervention.replay()"
     />
 
     <RiskGauge :risk="risk" />
