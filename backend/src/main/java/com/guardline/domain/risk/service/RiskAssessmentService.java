@@ -35,6 +35,7 @@ public class RiskAssessmentService {
 
     private final LlmGatewayClient llmGatewayClient;
     private final RiskScorer riskScorer;
+    private final KeywordSignalDetector keywordSignalDetector;
     private final LlmProperties llmProperties;
 
     private final Map<String, CallState> calls = new ConcurrentHashMap<>();
@@ -57,14 +58,21 @@ public class RiskAssessmentService {
         log.info("판정 세션 시작: {} (수신통화={}, 주기={}ms)", sessionId, inbound, interval);
     }
 
-    /** 확정된 문장 하나가 도착했다. 누적만 하고 판정은 고정 주기 스케줄러가 돌린다. */
-    public void onFinalTranscript(String sessionId, String transcript) {
+    /**
+     * 확정된 문장 하나가 도착했다. 누적만 하고 판정은 고정 주기 스케줄러가 돌린다.
+     *
+     * <p>화자 라벨을 문장 앞에 붙인다. "가족에게 말하지 마라"는 상대방이 말해야 격리 유도이고,
+     * 사용자가 "가족과 상의해볼게요"라고 한 것은 정반대 신호다. 누가 말했는지 없이는 같은
+     * 문장을 구별할 수 없다.
+     */
+    public void onFinalTranscript(String sessionId, String transcript, String speaker) {
         CallState state = calls.get(sessionId);
         if (state == null || transcript == null || transcript.isBlank()) {
             return;
         }
+        String line = (speaker == null || speaker.isBlank()) ? transcript : speaker + ": " + transcript;
         synchronized (state) {
-            state.lines.add(transcript);
+            state.lines.add(line);
         }
     }
 
@@ -113,11 +121,15 @@ public class RiskAssessmentService {
             return; // 아직 확정된 문장이 없다. 호출해봐야 레이트 리밋만 소모한다.
         }
 
-        SignalDetectionResult detected = llmGatewayClient.detect(window);
+        // 규칙이 먼저다. LLM 호출이 실패하거나(429·타임아웃) 회차마다 결과가 흔들려도
+        // 어휘로 확정되는 신호는 항상 잡힌다.
+        SignalDetectionResult byRule = keywordSignalDetector.detect(window);
+        SignalDetectionResult byLlm = llmGatewayClient.detect(window);
 
         RiskAssessmentResponseDTO assessment;
         synchronized (state) {
-            merge(state, detected);
+            merge(state, byRule);
+            merge(state, byLlm);
             assessment = riskScorer.score(
                     Map.copyOf(state.stages),
                     Set.copyOf(state.negatives),

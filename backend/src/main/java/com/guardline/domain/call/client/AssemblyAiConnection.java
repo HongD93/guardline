@@ -63,10 +63,27 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
             return;
         }
         Integer turnOrder = node.hasNonNull("turn_order") ? node.get("turn_order").asInt() : null;
+        String speaker = readSpeaker(node);
 
         listener.onEvent(node.path("end_of_turn").asBoolean(false)
-                ? TranscriptEventResponseDTO.finalTurn(transcript, turnOrder)
-                : TranscriptEventResponseDTO.partial(transcript, turnOrder));
+                ? TranscriptEventResponseDTO.finalTurn(transcript, turnOrder, speaker)
+                : TranscriptEventResponseDTO.partial(transcript, turnOrder, speaker));
+    }
+
+    /**
+     * 화자 라벨을 꺼낸다. 턴 단위 필드가 없으면 단어 단위 라벨의 첫 값을 쓴다.
+     * 응답 형태가 모델마다 달라 두 위치를 모두 확인한다.
+     */
+    private String readSpeaker(JsonNode node) {
+        if (node.hasNonNull("speaker")) {
+            return node.get("speaker").asText();
+        }
+        for (JsonNode word : node.path("words")) {
+            if (word.hasNonNull("speaker")) {
+                return word.get("speaker").asText();
+            }
+        }
+        return null;
     }
 
     @Override

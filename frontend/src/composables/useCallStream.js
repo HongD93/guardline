@@ -52,7 +52,7 @@ export function useCallStream() {
         partialText.value = event.transcript;
         break;
       case 'final':
-        finalTurns.value.push({ transcript: event.transcript, turnOrder: event.turnOrder });
+        finalTurns.value.push({ transcript: event.transcript, turnOrder: event.turnOrder, speaker: event.speaker });
         partialText.value = '';
         break;
       case 'risk':

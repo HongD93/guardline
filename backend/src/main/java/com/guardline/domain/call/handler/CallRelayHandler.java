@@ -102,7 +102,7 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
             send(sessionId, event);
             // 확정 문장만 판정에 넘긴다. partial은 계속 바뀌므로 신호 감지에 쓸 수 없다.
             if ("final".equals(event.type())) {
-                riskAssessmentService.onFinalTranscript(sessionId, event.transcript());
+                riskAssessmentService.onFinalTranscript(sessionId, event.transcript(), event.speaker());
             }
         });
         upstreams.put(sessionId, connection);

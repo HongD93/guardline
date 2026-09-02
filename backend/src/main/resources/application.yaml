@@ -21,6 +21,23 @@ guardline:
     speech-model: ${ASSEMBLYAI_SPEECH_MODEL:whisper-rt}
     # whisper-rt는 언어 파라미터를 받지 않고 자동 감지한다. 비워둔다.
     language-code: ${ASSEMBLYAI_LANGUAGE_CODE:}
+    # 화자 분리. whisper-rt는 이 파라미터를 수락하지만 실제로는 분리하지 않고 전 구간을
+    # 화자 A로 반환한다(실측). 남녀 음성으로 바꿔 재현해도 동일했다. 지원이 확인되면 켠다.
+    speaker-labels: false
+    # 전사 정확도를 높일 도메인 용어. 보이스피싱 통화에 반복해서 나오는 표현들이다.
+    keyterms:
+      - 대포통장
+      - 자금세탁
+      - 명의도용
+      - 체포영장
+      - 안전계좌
+      - 국가안전계좌
+      - 수사기밀
+      - 피의자
+      - 검찰청
+      - 금융감독원
+      - 이상거래탐지
+      - 보이스피싱
   llm:
     # STT와 같은 API 키를 쓴다. 별도 시크릿이 없다.
     endpoint: https://llm-gateway.assemblyai.com/v1/chat/completions

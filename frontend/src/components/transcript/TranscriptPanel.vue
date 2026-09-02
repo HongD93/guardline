@@ -27,6 +27,9 @@ watch(
 
     <p v-for="turn in finalTurns" :key="turn.turnOrder" class="turn">
       <span class="turn-order">{{ turn.turnOrder ?? '-' }}</span>
+      <span v-if="turn.speaker" class="speaker" :class="`speaker-${turn.speaker.toLowerCase()}`">
+        {{ turn.speaker }}
+      </span>
       {{ turn.transcript }}
     </p>
 
@@ -64,6 +67,29 @@ watch(
   color: var(--personal-color-gray-600);
   font-size: 0.8rem;
   text-align: right;
+}
+
+/* 화자 라벨. 누가 말했는지가 신호 해석을 좌우하므로 자막에서 바로 보여야 한다. */
+.speaker {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: var(--personal-radius);
+  background: var(--personal-color-gray-300);
+  color: var(--personal-color-white);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.speaker-a {
+  background: var(--personal-color-red);
+}
+
+.speaker-b {
+  background: var(--personal-color-gray-600);
 }
 
 /* 확정 전 인식 결과는 계속 바뀌므로 시각적으로 구분한다 */
