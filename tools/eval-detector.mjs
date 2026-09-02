@@ -40,6 +40,7 @@ async function call(transcript) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: 1024,
+      temperature: 0,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `[통화 내용]\n${transcript.join('\n')}` },
