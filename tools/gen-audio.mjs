@@ -67,9 +67,21 @@ for (const sc of targets) {
   }
 }
 
+// 일부만 재생성해도 나머지 시나리오의 매핑이 사라지면 안 된다. 기존 manifest에서 이번에
+// 다시 만든 시나리오만 걷어내고 병합한다. 통째로 덮어쓰면 프론트가 나머지 오디오를 못 찾는다.
 const manifestPath = path.join(ROOT, 'scenarios', 'manifest.json');
-await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+const regenerated = new Set(targets.map((s) => s.id));
+let previous = [];
+try {
+  previous = JSON.parse(await readFile(manifestPath, 'utf8'));
+} catch {
+  previous = [];
+}
+const merged = [...previous.filter((entry) => !regenerated.has(entry.scenario)), ...manifest]
+  .sort((a, b) => a.scenario.localeCompare(b.scenario) || a.seq - b.seq);
+
+await writeFile(manifestPath, JSON.stringify(merged, null, 2) + '\n', 'utf8');
 
 const labelled = manifest.filter((m) => m.labels.length > 0).length;
 console.log(`\n음성 ${manifest.length}개 생성. 라벨이 붙은 발화 ${labelled}개.`);
-console.log(`manifest: ${path.relative(ROOT, manifestPath)}`);
+console.log(`manifest: ${path.relative(ROOT, manifestPath)} (전체 ${merged.length}개 발화)`);
