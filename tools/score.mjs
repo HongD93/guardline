@@ -4,6 +4,7 @@
 //   node tools/score.mjs --trace  사기 시나리오의 턴별 위험도 추이까지 출력
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -72,38 +73,45 @@ export function score(stages, negatives = [], inbound = true) {
 }
 
 // ---- 시나리오 검증 ----
-const spec = JSON.parse(await readFile(path.join(ROOT, 'scenarios', 'scenarios.json'), 'utf8'));
-const trace = process.argv.includes('--trace');
-
-console.log('시나리오               종류    raw   체인  배수   감점   점수   판정');
-console.log('─'.repeat(72));
-
-for (const sc of spec.scenarios) {
-  const r = score(sc.expected.stages, sc.expected.negatives, sc.inbound);
-  const ok = r.level === sc.expected.level;
-  console.log(
-    `${sc.id.padEnd(22)} ${sc.kind.padEnd(7)} ${String(r.raw).padStart(5)} ` +
-      `${String(r.chain).padStart(4)} ${String(r.multiplier).padStart(5)} ` +
-      `${String(r.penalty).padStart(6)} ${String(r.score).padStart(6)}   ` +
-      `${r.level}${r.isolationFloor ? ' (격리floor)' : ''} ${ok ? '' : '  ← 기대와 불일치'}`,
-  );
-}
-
-if (trace) {
-  const fraud = spec.scenarios.find((s) => s.kind === 'fraud');
-  console.log(`\n[${fraud.id}] 턴별 위험도 추이 — 데모 타임라인\n`);
-  console.log('턴  화자        신호        점수   판정');
-  console.log('─'.repeat(52));
-
-  const seen = {};
-  for (const [i, turn] of fraud.turns.entries()) {
-    for (const l of turn.labels) {
-      if (STAGE_W[l]) seen[l] = fraud.expected.stages[l];
-    }
-    const r = score(seen, [], fraud.inbound);
+// 다른 모듈이 score()만 쓰려고 import할 때 이 출력이 섞이지 않도록 직접 실행일 때만 돈다.
+async function main() {
+  const spec = JSON.parse(await readFile(path.join(ROOT, 'scenarios', 'scenarios.json'), 'utf8'));
+  const trace = process.argv.includes('--trace');
+  
+  console.log('시나리오               종류    raw   체인  배수   감점   점수   판정');
+  console.log('─'.repeat(72));
+  
+  for (const sc of spec.scenarios) {
+    const r = score(sc.expected.stages, sc.expected.negatives, sc.inbound);
+    const ok = r.level === sc.expected.level;
     console.log(
-      `${String(i + 1).padStart(2)}  ${turn.speaker.padEnd(10)} ` +
-        `${(turn.labels.join(',') || '-').padEnd(10)} ${String(r.score).padStart(6)}   ${r.level}`,
+      `${sc.id.padEnd(22)} ${sc.kind.padEnd(7)} ${String(r.raw).padStart(5)} ` +
+        `${String(r.chain).padStart(4)} ${String(r.multiplier).padStart(5)} ` +
+        `${String(r.penalty).padStart(6)} ${String(r.score).padStart(6)}   ` +
+        `${r.level}${r.isolationFloor ? ' (격리floor)' : ''} ${ok ? '' : '  ← 기대와 불일치'}`,
     );
   }
+  
+  if (trace) {
+    const fraud = spec.scenarios.find((s) => s.kind === 'fraud');
+    console.log(`\n[${fraud.id}] 턴별 위험도 추이 — 데모 타임라인\n`);
+    console.log('턴  화자        신호        점수   판정');
+    console.log('─'.repeat(52));
+  
+    const seen = {};
+    for (const [i, turn] of fraud.turns.entries()) {
+      for (const l of turn.labels) {
+        if (STAGE_W[l]) seen[l] = fraud.expected.stages[l];
+      }
+      const r = score(seen, [], fraud.inbound);
+      console.log(
+        `${String(i + 1).padStart(2)}  ${turn.speaker.padEnd(10)} ` +
+          `${(turn.labels.join(',') || '-').padEnd(10)} ${String(r.score).padStart(6)}   ${r.level}`,
+      );
+    }
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
 }
