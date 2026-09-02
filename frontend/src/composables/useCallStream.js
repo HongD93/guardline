@@ -22,6 +22,7 @@ export function useCallStream() {
   const finalTurns = ref([]);
   const partialText = ref('');
   const errorMessage = ref('');
+  const risk = ref(null);
 
   let socket = null;
   let audioContext = null;
@@ -51,6 +52,9 @@ export function useCallStream() {
         finalTurns.value.push({ transcript: event.transcript, turnOrder: event.turnOrder });
         partialText.value = '';
         break;
+      case 'risk':
+        risk.value = event.risk;
+        break;
       case 'closed':
         status.value = 'closed';
         break;
@@ -79,14 +83,17 @@ export function useCallStream() {
     };
   });
 
-  /** start를 보내고 업스트림 STT가 Begin을 돌려줄 때까지 기다린다. */
-  const waitForReady = () => new Promise((resolve, reject) => {
+  /**
+   * start를 보내고 업스트림 STT가 Begin을 돌려줄 때까지 기다린다.
+   * inbound는 텍스트가 아닌 통화 메타데이터로, 사용자가 건 전화면 감점 신호 N3이 붙는다.
+   */
+  const waitForReady = (inbound) => new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('업스트림 STT 응답이 없습니다. API 키 설정을 확인하세요.')), READY_TIMEOUT_MS);
     readyResolve = () => {
       clearTimeout(timer);
       resolve();
     };
-    socket.send(JSON.stringify({ type: 'start' }));
+    socket.send(JSON.stringify({ type: 'start', inbound }));
   });
 
   const sendChunk = (samples) => {
@@ -95,20 +102,20 @@ export function useCallStream() {
     }
   };
 
-  const prepare = async () => {
+  const prepare = async (inbound) => {
     reset();
     status.value = 'connecting';
     await openSocket();
-    await waitForReady();
+    await waitForReady(inbound);
     if (status.value === 'error') {
       throw new Error(errorMessage.value);
     }
     status.value = 'streaming';
   };
 
-  const startMic = async () => {
+  const startMic = async (inbound = true) => {
     try {
-      await prepare();
+      await prepare(inbound);
 
       // 16kHz로 컨텍스트를 열면 브라우저가 마이크 원본(보통 48kHz)을 알아서 리샘플해준다.
       audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
@@ -140,12 +147,12 @@ export function useCallStream() {
    *
    * @param urls 턴 단위 오디오 경로 배열
    */
-  const playScenario = async (urls) => {
+  const playScenario = async (urls, inbound = true) => {
     await stop(); // 이전 재생이 남아 있으면 먼저 끊는다
     const run = ++generation;
 
     try {
-      await prepare();
+      await prepare(inbound);
       if (run !== generation) {
         return;
       }
@@ -262,7 +269,8 @@ export function useCallStream() {
     finalTurns.value = [];
     partialText.value = '';
     errorMessage.value = '';
+    risk.value = null;
   };
 
-  return { status, finalTurns, partialText, errorMessage, startMic, playScenario, stop };
+  return { status, finalTurns, partialText, errorMessage, risk, startMic, playScenario, stop };
 }

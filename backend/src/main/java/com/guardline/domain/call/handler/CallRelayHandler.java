@@ -4,7 +4,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.guardline.domain.call.client.AssemblyAiConnection;
 import com.guardline.domain.call.client.AssemblyAiStreamClient;
+import com.guardline.domain.call.response.RiskEventResponseDTO;
 import com.guardline.domain.call.response.TranscriptEventResponseDTO;
+import com.guardline.domain.risk.service.RiskAssessmentService;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +39,7 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
 
     private final AssemblyAiStreamClient streamClient;
     private final ObjectMapper objectMapper;
+    private final RiskAssessmentService riskAssessmentService;
 
     private final Map<String, WebSocketSession> browserSessions = new ConcurrentHashMap<>();
     private final Map<String, AssemblyAiConnection> upstreams = new ConcurrentHashMap<>();
@@ -55,7 +58,8 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
         try {
             JsonNode node = objectMapper.readTree(message.getPayload());
             switch (node.path("type").asText()) {
-                case "start" -> startUpstream(sessionId);
+                // inbound는 텍스트가 아닌 통화 메타데이터다. 사용자가 건 전화면 감점 신호 N3이 붙는다.
+                case "start" -> startUpstream(sessionId, node.path("inbound").asBoolean(true));
                 case "stop" -> stopUpstream(sessionId);
                 default -> log.debug("처리하지 않는 제어 메시지: {}", message.getPayload());
             }
@@ -86,22 +90,33 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
         log.info("브라우저 연결 종료: {} ({})", session.getId(), status.getCode());
     }
 
-    private void startUpstream(String sessionId) throws Exception {
+    private void startUpstream(String sessionId, boolean inbound) throws Exception {
         if (upstreams.containsKey(sessionId)) {
             return;
         }
-        AssemblyAiConnection connection = streamClient.open(event -> send(sessionId, event));
+        riskAssessmentService.start(sessionId, inbound,
+                assessment -> send(sessionId, RiskEventResponseDTO.of(assessment)));
+
+        AssemblyAiConnection connection = streamClient.open(event -> {
+            send(sessionId, event);
+            // 확정 문장만 판정에 넘긴다. partial은 계속 바뀌므로 신호 감지에 쓸 수 없다.
+            if ("final".equals(event.type())) {
+                riskAssessmentService.onFinalTranscript(sessionId, event.transcript());
+            }
+        });
         upstreams.put(sessionId, connection);
     }
 
     private void stopUpstream(String sessionId) {
+        riskAssessmentService.end(sessionId);
+
         AssemblyAiConnection upstream = upstreams.remove(sessionId);
         if (upstream != null) {
             upstream.terminate();
         }
     }
 
-    private void send(String sessionId, TranscriptEventResponseDTO event) {
+    private void send(String sessionId, Object event) {
         WebSocketSession session = browserSessions.get(sessionId);
         if (session == null || !session.isOpen()) {
             return;

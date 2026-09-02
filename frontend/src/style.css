@@ -4,6 +4,14 @@
   --personal-color-red-dark: #d32f2f;
   --personal-color-red-soft: #fdecea;
 
+  /* 색상 - 위험도 등급 (주의 / 경고) */
+  --personal-color-amber: #f5a623;
+  --personal-color-amber-dark: #b26a00;
+  --personal-color-amber-soft: #fff4e0;
+  --personal-color-orange: #ef7c1a;
+  --personal-color-orange-dark: #c25100;
+  --personal-color-orange-soft: #ffeadb;
+
   /* 색상 - 중립 */
   --personal-color-white: #ffffff;
   --personal-color-gray-100: #f5f6f7;
@@ -14,6 +22,10 @@
   /* 모서리 */
   --personal-radius: 5px;
   --personal-radius-card: 15px;
+
+  /* 뱃지 */
+  --personal-badge-padding: 4px 10px;
+  --personal-badge-font-size: 0.75rem;
 }
 
 * {

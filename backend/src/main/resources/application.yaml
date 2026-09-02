@@ -21,6 +21,20 @@ guardline:
     speech-model: ${ASSEMBLYAI_SPEECH_MODEL:whisper-rt}
     # whisper-rt는 언어 파라미터를 받지 않고 자동 감지한다. 비워둔다.
     language-code: ${ASSEMBLYAI_LANGUAGE_CODE:}
+  llm:
+    # STT와 같은 API 키를 쓴다. 별도 시크릿이 없다.
+    endpoint: https://llm-gateway.assemblyai.com/v1/chat/completions
+    # 모델 ID는 날짜 접미사까지 정확히 맞아야 한다. 무료 크레딧 계정은 이 모델만 접근 가능하고
+    # 다른 모델은 400 "does not have access"가 난다. 접근 가능 목록은 GET /v1/models로 확인한다.
+    model: ${GUARDLINE_LLM_MODEL:qwen3.5-4b-32k-fast}
+    max-tokens: 1024
+    timeout-ms: 8000
+    # 무료 계정 레이트 리밋이 빡빡해서(429) 짧게 잡으면 대부분의 판정 회차가 버려진다.
+    # 통화 전체를 매번 다시 검사하므로 간격이 길어도 뒤늦게 나온 단계를 놓치지 않는다.
+    interval-ms: 10000
+    # 판정에 넘길 확정 문장 수. 통화 전체를 매번 다시 검사해야 뒤늦게 나온 단계도 잡힌다.
+    window-lines: 60
+
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5175}
 
