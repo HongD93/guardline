@@ -25,10 +25,19 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Value("${guardline.cors.allowed-origins}")
     private String[] allowedOrigins;
 
+    /**
+     * 허용 오리진이 비어 있으면 지정하지 않는다. Spring 기본값이 동일 오리진만 허용하는데,
+     * 배포에서는 프론트를 같은 서버가 서빙하므로 그게 정확히 맞고 가장 안전하다.
+     * 개발 중에만 Vite 개발 서버 오리진을 열어준다.
+     */
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(callRelayHandler, "/ws/call")
-                .setAllowedOrigins(allowedOrigins);
+        var registration = registry.addHandler(callRelayHandler, "/ws/call");
+
+        String[] origins = allowedOrigins == null ? new String[0] : allowedOrigins;
+        if (origins.length > 0 && !origins[0].isBlank()) {
+            registration.setAllowedOrigins(origins);
+        }
     }
 
     @Bean

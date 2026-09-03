@@ -24,3 +24,4 @@ frontend/.vite/
 # OS
 Thumbs.db
 .DS_Store
+backend/src/main/resources/static/

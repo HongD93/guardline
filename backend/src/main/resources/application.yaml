@@ -55,7 +55,15 @@ guardline:
     # 판정에 넘길 확정 문장 수. 통화 전체를 매번 다시 검사해야 뒤늦게 나온 단계도 잡힌다.
     window-lines: 60
 
+  # 공개 배포에서 API 크레딧을 지키는 상한. 심사 기간에는 환경변수로 넉넉히 올린다.
+  quota:
+    daily-sessions: ${GUARDLINE_DAILY_SESSIONS:50}
+    concurrent: ${GUARDLINE_CONCURRENT_SESSIONS:2}
+    max-duration-ms: ${GUARDLINE_MAX_SESSION_MS:180000}
+
   cors:
+    # 프론트를 같은 서버에서 서빙하므로 배포 환경에서는 오리진이 갈라지지 않는다.
+    # 개발 중에만 Vite 개발 서버(5175)를 허용한다.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5175}
 
 logging:
