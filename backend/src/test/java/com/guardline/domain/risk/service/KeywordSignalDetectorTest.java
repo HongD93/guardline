@@ -14,6 +14,15 @@ import org.junit.jupiter.api.Test;
 class KeywordSignalDetectorTest {
 
     @Test
+    void 카드사_해외결제시도_통보도_공포조성_신호로_잡는다() {
+        assertThat(stageIds(List.of("고객님 명의 카드로 해외 가맹점에서 결제 시도가 두 건 있었습니다")))
+                .contains("S2");
+        assertThat(stageIds(List.of("고객님 명예 카드로 해외 가맹점에서 결제 시도가 두 건 있었습니다")))
+                .contains("S2");
+        assertThat(stageIds(List.of("해외 가맹점 결제 방법을 알려주세요"))).doesNotContain("S2");
+    }
+
+    @Test
     void 상의와_공식확인을_금지하는_말을_감점으로_처리하지_않는다() {
         assertThat(negativeIds(List.of("가족과 상의하지 마세요", "대표번호로 전화하시면 안 됩니다")))
                 .doesNotContain("N1", "N2");

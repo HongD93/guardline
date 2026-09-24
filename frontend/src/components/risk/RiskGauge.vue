@@ -13,8 +13,14 @@ const LEVEL_CLASS = {
 };
 
 const score = computed(() => props.risk?.score ?? 0);
-const level = computed(() => props.risk?.level ?? '안전');
+const level = computed(() => props.risk?.level ?? '판정 대기');
 const levelClass = computed(() => LEVEL_CLASS[level.value] ?? 'safe');
+const guidance = computed(() => {
+  if (!props.risk) return '아직 판정 결과가 없습니다.';
+  if (level.value === '안전') return '현재 탐지된 위험 신호가 적습니다. 상대방의 신원이 확인된 것은 아닙니다.';
+  if (level.value === '주의') return '확인이 필요한 요청이 있습니다. 송금 전 알고 있던 연락처로 상대방에게 직접 확인하세요.';
+  return '송금·설치·정보 제공을 멈추고, 통화를 종료한 뒤 알고 있던 연락처로 확인하세요.';
+});
 
 // 임계치 눈금. 게이지에 근거를 같이 보여줘야 왜 이 등급인지 화면만으로 설명된다.
 const MARKS = [
@@ -28,7 +34,7 @@ const MARKS = [
   <section class="gauge" :class="levelClass">
     <header class="head">
       <span class="label">위험도</span>
-      <span class="value">{{ score }}<span class="unit">점</span></span>
+      <span class="value">{{ props.risk ? score : '—' }}<span v-if="props.risk" class="unit">점</span></span>
       <span class="badge">{{ level }}</span>
     </header>
 
@@ -44,6 +50,7 @@ const MARKS = [
       </span>
     </div>
 
+    <p class="guidance">{{ guidance }}</p>
     <p v-if="props.risk?.isolationFloor" class="note">
       격리 유도가 확인되어 위험 등급이 강제 적용됐습니다.
     </p>
@@ -147,6 +154,13 @@ const MARKS = [
   background: var(--personal-color-red-soft);
   color: var(--personal-color-red-dark);
   font-size: 0.8rem;
+}
+
+.guidance {
+  margin: 12px 0 0;
+  color: var(--personal-color-gray-600);
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 .breakdown {

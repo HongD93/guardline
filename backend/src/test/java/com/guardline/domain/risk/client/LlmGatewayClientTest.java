@@ -14,9 +14,47 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import tools.jackson.databind.json.JsonMapper;
 
 class LlmGatewayClientTest {
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "S4|링크 하나 보내드렸습니다",
+            "S4|공식 앱에서 직접 확인하세요",
+            "S4|이 앱을 설치하지 마세요",
+            "S4|비밀번호를 알려줄 필요가 없습니다",
+            "S5|계좌 알려주세요",
+            "S5|네 지금 보낼게요",
+            "S5|오십만 원을 보내지 마세요",
+            "S5|계좌번호 확인했고 잔액은 오십만 원입니다",
+            "S5|송금은 하지 마세요"
+    })
+    void 원문이어도_요청이_아닌_근거는_행동신호로_쓰지_않는다(String id, String evidence) {
+        content = id + "|yes|0.95|" + evidence;
+        assertThat(client.detect(List.of(evidence)).stages()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "S4|A: 앱을 설치해 주세요",
+            "S4|보내드린 링크를 눌러 주세요",
+            "S4|인증번호를 알려주세요",
+            "S4|OTP를 불러 주세요",
+            "S5|국가안전계좌로 전액 이체해 주시면 됩니다",
+            "S5|오십만 원만 먼저 보내줄 수 있어?",
+            "S5|계좌번호 123456 예금주 테스트입니다 십오만 삼천 원이요",
+            "S5|현금을 인출해서 전달해 주세요",
+            "S5|상품권을 구매해 주세요"
+    })
+    void 실제_설치와_정보와_송금요구_근거는_유지한다(String id, String evidence) {
+        content = id + "|yes|0.9|" + evidence;
+        assertThat(client.detect(List.of(evidence)).stages()).singleElement().satisfies(signal -> {
+            assertThat(signal.id()).isEqualTo(id);
+            assertThat(signal.evidence()).isEqualTo(evidence);
+        });
+    }
 
     private final JsonMapper mapper = JsonMapper.builder().build();
     private HttpServer server;

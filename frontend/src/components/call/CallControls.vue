@@ -79,6 +79,7 @@ const STATUS_LABEL = {
 
 .row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
@@ -91,6 +92,7 @@ const STATUS_LABEL = {
 
 .select {
   flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--personal-color-gray-300);
   border-radius: var(--personal-radius);
@@ -99,6 +101,7 @@ const STATUS_LABEL = {
 }
 
 .button {
+  flex-shrink: 0;
   padding: 8px 16px;
   border: 1px solid var(--personal-color-gray-300);
   border-radius: var(--personal-radius);

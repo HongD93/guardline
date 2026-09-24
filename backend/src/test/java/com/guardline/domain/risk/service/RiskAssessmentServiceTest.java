@@ -17,6 +17,33 @@ import org.junit.jupiter.api.Test;
 
 class RiskAssessmentServiceTest {
     @Test
+    void 가족호칭은_신원확인이_아니며_송금뒤_격리요구는_위험이다() throws Exception {
+        LlmGatewayClient llm = mock(LlmGatewayClient.class);
+        when(llm.detect(anyList())).thenReturn(new SignalDetectionResult(List.of(
+                new SignalDetectionResult.Detected("S5", 0.9, "오십만 원만 먼저 보내줄 수 있어?")), List.of()));
+        List<RiskAssessmentResponseDTO> results = new CopyOnWriteArrayList<>();
+        CountDownLatch first = new CountDownLatch(1);
+        CountDownLatch ended = new CountDownLatch(1);
+        RiskAssessmentService service = new RiskAssessmentService(llm, new RiskScorer(),
+                new KeywordSignalDetector(), new LlmProperties("", "", 512, 1000, 10, 60));
+        try {
+            service.start("family-test", true, result -> { results.add(result); first.countDown(); });
+            service.onFinalTranscript("family-test", "아들 지금 통화 괜찮아? 오십만 원만 먼저 보내줄 수 있어?", null);
+            assertThat(first.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(results.getFirst().level()).isEqualTo("주의");
+            assertThat(results.getFirst().isolationFloor()).isFalse();
+            assertThat(results.getFirst().negatives()).isEmpty();
+            service.onFinalTranscript("family-test", "아무에게도 말하지 마세요. 전화는 절대 끊지 마세요", null);
+            service.end("family-test", ended::countDown);
+            assertThat(ended.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(results.getLast().level()).isEqualTo("위험");
+            assertThat(results.getLast().isolationFloor()).isTrue();
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void 최종호출에서_처음_429가_생겨도_한번만_재시도한다() throws Exception {
         LlmGatewayClient llm = mock(LlmGatewayClient.class);
         when(llm.retryAfterMillis()).thenReturn(0L, 25L, 25L);

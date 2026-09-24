@@ -57,7 +57,8 @@ public class KeywordSignalDetector {
                 compile("체포\\s*영장|구속\\s*영장|출국\\s*금지"),
                 compile("공범(으로)?\\s*(간주|취급|입건)"),
                 compile("계좌(가|를)?\\s*(동결|정지)"),
-                compile("피의자\\s*신분")
+                compile("피의자\\s*신분"),
+                compile("(고객님|본인).{0,20}카드.{0,30}(해외|가맹점).{0,12}결제\\s*시도")
         ));
 
         RULES.put("S3", List.of(
