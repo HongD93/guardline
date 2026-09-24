@@ -28,6 +28,7 @@ RUN chmod +x gradlew && ./gradlew dependencies --no-daemon || true
 COPY backend/src ./src
 # 프론트 산출물을 정적 리소스로 넣는다. SpaWebConfig가 classpath:/static/에서 서빙한다.
 COPY --from=frontend /build/frontend/dist ./src/main/resources/static
+COPY LICENSE THIRD_PARTY_NOTICES.md ./src/main/resources/static/
 RUN ./gradlew bootJar --no-daemon -x test
 
 # --- 3단계: 실행 --------------------------------------------------------------
@@ -37,6 +38,7 @@ WORKDIR /app
 # 루트로 돌리지 않는다.
 RUN addgroup -S guardline && adduser -S guardline -G guardline
 COPY --from=backend /build/build/libs/*.jar app.jar
+COPY LICENSE THIRD_PARTY_NOTICES.md ./
 USER guardline
 
 # Render 등은 PORT 환경변수로 포트를 지정한다. 없으면 8080.

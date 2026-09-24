@@ -85,3 +85,7 @@ Session counters are held in memory in a single instance and reset on process re
 - `tools/`: synthetic audio generation and diagnostic text evaluation.
 
 Built by Hong DaeWoon as a solo project. AI coding assistance was used for implementation and verification. Synthetic voices were generated with `edge-tts`; audio is not a real call recording.
+
+## License
+
+Original Guard Line code and documentation are licensed under [MIT](LICENSE), copyright (c) 2026 Hong DaeWoon. Third-party dependencies, services, and generated voice assets retain their own rights and terms; see [third-party notices](THIRD_PARTY_NOTICES.md).
