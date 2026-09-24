@@ -5,6 +5,9 @@ import tools.jackson.databind.ObjectMapper;
 import com.guardline.domain.call.response.TranscriptEventResponseDTO;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -26,11 +29,37 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
 
     private final ObjectMapper objectMapper;
     private final UpstreamListener listener;
+    private final long terminationTimeoutMs;
+    private final AtomicBoolean stopping = new AtomicBoolean();
+    private final AtomicBoolean closedNotified = new AtomicBoolean();
+    private final CompletableFuture<Void> terminated = new CompletableFuture<>();
+    private final CompletableFuture<Void> cleanup;
     private volatile WebSocketSession session;
 
     AssemblyAiConnection(ObjectMapper objectMapper, UpstreamListener listener) {
+        this(objectMapper, listener, 10_000);
+    }
+
+    AssemblyAiConnection(ObjectMapper objectMapper, UpstreamListener listener, long terminationTimeoutMs) {
         this.objectMapper = objectMapper;
         this.listener = listener;
+        this.terminationTimeoutMs = terminationTimeoutMs;
+        this.cleanup = terminated.handle((ignored, failure) -> {
+            if (failure != null) {
+                listener.onEvent(TranscriptEventResponseDTO.error(
+                        "음성 서비스의 종료 응답이 지연됐습니다. 마지막 전사가 누락될 수 있습니다."));
+                notifyClosed("업스트림 종료 응답 시간 초과. 마지막 전사가 누락될 수 있습니다.");
+            }
+            WebSocketSession current = session;
+            if (current != null && current.isOpen()) {
+                try {
+                    current.close(CloseStatus.NORMAL);
+                } catch (IOException e) {
+                    log.warn("업스트림 연결 정리 실패", e);
+                }
+            }
+            return null;
+        });
     }
 
     @Override
@@ -47,17 +76,19 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
             switch (type) {
                 case "Begin" -> listener.onEvent(TranscriptEventResponseDTO.ready());
                 case "Turn" -> handleTurn(node);
-                case "Termination" -> listener.onEvent(
-                        TranscriptEventResponseDTO.closed("업스트림 세션 종료 (오디오 %.1f초)"
-                                .formatted(node.path("audio_duration_seconds").asDouble())));
+                case "Termination" -> finish("업스트림 세션 종료 (오디오 %.1f초)"
+                        .formatted(node.path("audio_duration_seconds").asDouble()));
                 default -> log.debug("처리하지 않는 업스트림 메시지 타입: {}", type);
             }
         } catch (Exception e) {
-            log.warn("업스트림 메시지 파싱 실패: {}", message.getPayload(), e);
+            log.warn("업스트림 메시지 처리 실패", e);
         }
     }
 
     private void handleTurn(JsonNode node) {
+        if (terminated.isDone()) {
+            return;
+        }
         String transcript = node.path("transcript").asText("");
         if (transcript.isBlank()) {
             return;
@@ -90,14 +121,14 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.error("업스트림 전송 오류", exception);
         listener.onEvent(TranscriptEventResponseDTO.error("업스트림 전송 오류: " + exception.getMessage()));
+        finish("업스트림 전송 오류로 종료됐습니다.");
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         String reason = describeCloseCode(status.getCode());
         log.info("업스트림 연결 종료: {} {} ({})", status.getCode(), status.getReason(), reason);
-        listener.onEvent(TranscriptEventResponseDTO.closed("업스트림 연결 종료 (%d) - %s"
-                .formatted(status.getCode(), reason)));
+        finish("업스트림 연결 종료 (%d) - %s".formatted(status.getCode(), reason));
     }
 
     /** 공식 지침이 정의한 종료 코드. 원인을 바로 알 수 있어야 디버깅에서 헤매지 않는다. */
@@ -115,24 +146,45 @@ public class AssemblyAiConnection extends AbstractWebSocketHandler {
     }
 
     /** PCM16 오디오 청크를 업스트림으로 넘긴다. */
-    public void sendAudio(ByteBuffer audio) throws IOException {
+    public synchronized void sendAudio(ByteBuffer audio) throws IOException {
         WebSocketSession current = session;
-        if (current != null && current.isOpen()) {
+        if (!stopping.get() && current != null && current.isOpen()) {
             current.sendMessage(new BinaryMessage(audio));
         }
     }
 
-    /** 마지막 턴을 확정시키고 세션을 닫는다. */
-    public void terminate() {
+    /** 종료 응답 또는 제한 시간까지 마지막 턴을 받는다. 중복 호출도 같은 완료를 기다린다. */
+    public synchronized CompletableFuture<Void> terminate() {
+        if (!stopping.compareAndSet(false, true)) {
+            return cleanup;
+        }
         WebSocketSession current = session;
         if (current == null || !current.isOpen()) {
-            return;
+            finish("업스트림 연결이 이미 종료됐습니다.");
+            return cleanup;
         }
         try {
             current.sendMessage(TERMINATE);
-            current.close(CloseStatus.NORMAL);
+            terminated.orTimeout(terminationTimeoutMs, TimeUnit.MILLISECONDS);
         } catch (IOException e) {
             log.warn("업스트림 종료 실패", e);
+            finish("업스트림 종료 요청 전송에 실패했습니다.");
+        }
+        return cleanup;
+    }
+
+    private void finish(String message) {
+        stopping.set(true);
+        try {
+            notifyClosed(message);
+        } finally {
+            terminated.complete(null);
+        }
+    }
+
+    private void notifyClosed(String message) {
+        if (closedNotified.compareAndSet(false, true)) {
+            listener.onEvent(TranscriptEventResponseDTO.closed(message));
         }
     }
 }

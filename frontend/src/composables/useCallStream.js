@@ -9,8 +9,8 @@ const CHUNK_INTERVAL_MS = (CHUNK_SAMPLES / TARGET_SAMPLE_RATE) * 1000;
 /** 업스트림이 허용하는 최소 청크 길이 50ms. 이보다 짧게 보내면 종료 코드 3007로 끊긴다. */
 const MIN_CHUNK_SAMPLES = TARGET_SAMPLE_RATE * 0.05;
 
-/** stop 이후 서버가 마지막 판정을 마치고 소켓을 닫아줄 때까지의 최대 대기. */
-const FINAL_ASSESSMENT_WAIT_MS = 20000;
+/** 종료 응답·진행 중 판정·30초 호출 제한 대기·한 번의 재시도를 포함한 UI 대기 상한. */
+const FINAL_ASSESSMENT_WAIT_MS = 90000;
 
 /**
  * 브라우저 오디오를 릴레이로 흘려보내고 전사 이벤트를 받는다.
@@ -21,7 +21,7 @@ const FINAL_ASSESSMENT_WAIT_MS = 20000;
  */
 export function useCallStream() {
   // 1. State
-  const status = ref('idle'); // idle | connecting | ready | streaming | closed | error
+  const status = ref('idle'); // idle | connecting | ready | streaming | finalizing | closed | error
   const finalTurns = ref([]);
   const partialText = ref('');
   const errorMessage = ref('');
@@ -32,6 +32,7 @@ export function useCallStream() {
   let playbackContext = null;
   let micStream = null;
   let readyResolve = null;
+  let socketGeneration = 0;
 
   // 재생 세대(generation). stop()이나 새 재생이 시작되면 증가하고, 진행 중이던 루프는
   // 자기 세대가 아님을 확인하는 즉시 빠져나온다. fetch/디코딩 await 사이에 stop이 끼어들어
@@ -59,7 +60,9 @@ export function useCallStream() {
         risk.value = event.risk;
         break;
       case 'closed':
-        status.value = 'closed';
+        // 업스트림 종료 뒤에도 서버의 최종 판정이 남아 있다.
+        if (status.value !== 'error') status.value = 'finalizing';
+        void stop();
         break;
       case 'error':
         status.value = 'error';
@@ -72,15 +75,18 @@ export function useCallStream() {
   };
 
   const openSocket = () => new Promise((resolve, reject) => {
+    const connection = ++socketGeneration;
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
     socket = new WebSocket(`${scheme}://${window.location.host}${RELAY_PATH}`);
     socket.binaryType = 'arraybuffer';
 
     socket.onopen = resolve;
     socket.onerror = () => reject(new Error('릴레이 서버에 연결하지 못했습니다. 백엔드가 떠 있는지 확인하세요.'));
-    socket.onmessage = (message) => handleEvent(JSON.parse(message.data));
+    socket.onmessage = (message) => {
+      if (connection === socketGeneration) handleEvent(JSON.parse(message.data));
+    };
     socket.onclose = () => {
-      if (status.value !== 'error') {
+      if (connection === socketGeneration && status.value !== 'error') {
         status.value = 'closed';
       }
     };
@@ -248,13 +254,21 @@ export function useCallStream() {
     generation += 1; // 진행 중인 재생 루프를 전부 무효화한다
 
     const closing = socket;
+    const connection = socketGeneration;
     socket = null;
 
     if (closing?.readyState === WebSocket.OPEN) {
+      if (status.value !== 'error') status.value = 'finalizing';
       // 소켓을 바로 닫지 않는다. 서버가 마지막 판정을 마치고 결과를 보낸 뒤 닫아준다.
       // 감점 신호는 통화 끝에 나오는 경우가 많아 이 마지막 결과를 놓치면 등급이 뒤집힌다.
       closing.send(JSON.stringify({ type: 'stop' }));
-      const fallback = setTimeout(() => closing.close(), FINAL_ASSESSMENT_WAIT_MS);
+      const fallback = setTimeout(() => {
+        if (closing.readyState === WebSocket.OPEN && socketGeneration === connection) {
+          status.value = 'error';
+          errorMessage.value = '최종 판정 대기 시간이 초과됐습니다. 마지막 결과가 반영되지 않았을 수 있습니다.';
+        }
+        closing.close();
+      }, FINAL_ASSESSMENT_WAIT_MS);
       closing.addEventListener('close', () => clearTimeout(fallback), { once: true });
     } else {
       closing?.close();
@@ -263,16 +277,14 @@ export function useCallStream() {
     micStream?.getTracks().forEach((track) => track.stop());
     micStream = null;
 
-    if (audioContext) {
-      await audioContext.close();
-      audioContext = null;
-    }
+    const closingAudio = audioContext;
+    audioContext = null;
+    if (closingAudio) await closingAudio.close();
 
     // 스피커로 나가던 재생을 끊는다. 컨텍스트를 닫으면 연결된 소스도 함께 멈춘다.
-    if (playbackContext) {
-      await playbackContext.close();
-      playbackContext = null;
-    }
+    const closingPlayback = playbackContext;
+    playbackContext = null;
+    if (closingPlayback) await closingPlayback.close();
   };
 
   const reset = () => {

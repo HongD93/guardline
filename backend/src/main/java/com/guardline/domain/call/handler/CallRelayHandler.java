@@ -54,6 +54,7 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
 
     /** 상한을 점유한 세션. 중복 반납을 막기 위해 따로 들고 있는다. */
     private final Set<String> quotaHolders = ConcurrentHashMap.newKeySet();
+    private final Set<String> stopping = ConcurrentHashMap.newKeySet();
     private final Map<String, ScheduledFuture<?>> expiries = new ConcurrentHashMap<>();
     private final ScheduledExecutorService expiryScheduler = Executors.newSingleThreadScheduledExecutor();
 
@@ -113,7 +114,7 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
     }
 
     private void startUpstream(String sessionId, boolean inbound) throws Exception {
-        if (upstreams.containsKey(sessionId)) {
+        if (quotaHolders.contains(sessionId) || stopping.contains(sessionId)) {
             return;
         }
 
@@ -143,9 +144,16 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
                 // 확정 문장만 판정에 넘긴다. partial은 계속 바뀌므로 신호 감지에 쓸 수 없다.
                 if ("final".equals(event.type())) {
                     riskAssessmentService.onFinalTranscript(sessionId, event.transcript(), event.speaker());
+                } else if ("closed".equals(event.type())) {
+                    stopUpstream(sessionId);
                 }
             });
             upstreams.put(sessionId, connection);
+            // 연결 수립을 기다리는 동안 브라우저가 떠나거나 업스트림이 종료될 수 있다.
+            if (!quotaHolders.contains(sessionId) || stopping.contains(sessionId)) {
+                upstreams.remove(sessionId, connection);
+                connection.terminate();
+            }
         } catch (Exception e) {
             // 업스트림 연결에 실패하면 세션이 시작되지 않았으므로 상한을 되돌린다.
             // 브라우저가 소켓을 닫아줄 때까지 기다리면 실패한 시도가 한도를 먹는다.
@@ -161,19 +169,30 @@ public class CallRelayHandler extends AbstractWebSocketHandler {
      * 감점 신호는 보통 통화 끝에 나오므로 그 결과를 놓치면 정상 통화가 주의 등급으로 끝난다.
      */
     private void stopUpstream(String sessionId) {
+        if (!quotaHolders.contains(sessionId) || !stopping.add(sessionId)) {
+            return;
+        }
         ScheduledFuture<?> expiry = expiries.remove(sessionId);
         if (expiry != null) {
             expiry.cancel(false);
         }
+        AssemblyAiConnection upstream = upstreams.get(sessionId);
+        if (upstream != null) {
+            upstream.terminate().whenComplete((ignored, failure) -> finishStop(sessionId));
+        } else {
+            finishStop(sessionId);
+        }
+    }
+
+    private void finishStop(String sessionId) {
+        upstreams.remove(sessionId);
         if (quotaHolders.remove(sessionId)) {
             sessionQuota.release();
         }
-
-        AssemblyAiConnection upstream = upstreams.remove(sessionId);
-        if (upstream != null) {
-            upstream.terminate();
-        }
-        riskAssessmentService.end(sessionId, () -> closeBrowserSession(sessionId));
+        riskAssessmentService.end(sessionId, () -> {
+            closeBrowserSession(sessionId);
+            stopping.remove(sessionId);
+        });
     }
 
     private void closeBrowserSession(String sessionId) {

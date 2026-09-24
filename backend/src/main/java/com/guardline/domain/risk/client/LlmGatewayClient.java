@@ -25,8 +25,8 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>출력 형식은 JSON 스키마가 아니라 줄 단위 체크리스트다. 무료 크레딧 계정에서 쓸 수 있는
  * 모델이 response_format을 지원하지 않고, 열린 형태로 신호를 추출하게 하면 소형 모델이
- * 대부분의 단계를 놓친다. 8개 항목을 하나씩 예/아니오로 묻는 방식은 같은 모델에서
- * S1~S5를 전부 잡아낸다.
+ * 단계를 놓치는 사례가 있어 8개 항목을 하나씩 예/아니오로 묻는다.
+ * 응답은 원문 근거를 검증하며 실제 음성에서의 탐지율은 별도로 평가해야 한다.
  */
 @Slf4j
 @Component
@@ -63,6 +63,8 @@ public class LlmGatewayClient {
 
             각 항목마다 다음 한 줄로 답하세요. 다른 말은 쓰지 마세요.
             <항목ID>|<yes 또는 no>|<0.0~1.0 확신도>|<근거 문장 원문 그대로, 없으면 - >
+            근거는 입력의 한 줄 전체를 그대로 복사하세요. 일부 단어만 뽑거나 말을 덧붙이지 마세요.
+            줄 앞의 화자 라벨은 생략해도 됩니다.
 
             [예시 1] 사기 통화
             입력: 서울중앙지검 김민수 수사관입니다 / 명의도용 정황이 확인됐습니다 /
@@ -185,12 +187,17 @@ public class LlmGatewayClient {
         }
     }
 
+    /** 최종 판정이 429 대기 중인 회차에서 조용히 끝나지 않도록 남은 시간을 알려준다. */
+    public long retryAfterMillis() {
+        return Math.max(0, cooldownUntil - System.currentTimeMillis());
+    }
+
     private SignalDetectionResult parse(String response, List<String> transcript) {
         JsonNode root = objectMapper.readTree(response);
         String content = root.path("choices").path(0).path("message").path("content").asString();
 
         if (content == null || content.isBlank()) {
-            log.warn("LLM 응답에 content가 없다: {}", response);
+            log.warn("LLM 응답에 content가 없다.");
             return SignalDetectionResult.empty();
         }
 
@@ -209,8 +216,10 @@ public class LlmGatewayClient {
             }
 
             String id = matcher.group(1);
-            // 모델이 근거에 없는 말을 덧붙이는 경우가 있어 실제 전사 문장으로 되돌린다.
-            String evidence = snapToTranscript(matcher.group(4), transcript);
+            String evidence = findTranscriptEvidence(matcher.group(4), transcript);
+            if (evidence == null) {
+                continue;
+            }
 
             SignalDetectionResult.Detected signal = new SignalDetectionResult.Detected(id, confidence, evidence);
             if (id.startsWith("S")) {
@@ -231,34 +240,26 @@ public class LlmGatewayClient {
     }
 
     /**
-     * 모델이 돌려준 근거를 실제 전사 문장 중 가장 겹치는 것으로 바꾼다.
+     * 근거가 실제 전사 한 줄과 일치할 때만 원문으로 연결한다.
      *
-     * <p>화면에서 근거 문장을 하이라이트해야 하는데, 모델이 지어낸 표현이 섞이면 원문에서 찾을 수
-     * 없다. 2글자 조각의 겹침으로 가장 가까운 문장을 고른다.
+     * <p>부분 문자열 유사도는 부정문도 긍정 근거로 연결하므로 사용하지 않는다.
+     * 띄어쓰기와 입력의 화자 라벨 생략만 허용하며, 확인되지 않는 신호는 점수에 반영하지 않는다.
+     * 원문과 일치해도 신호의 의미 판정까지 보장하지는 않는다.
      */
-    private String snapToTranscript(String evidence, List<String> transcript) {
+    private String findTranscriptEvidence(String evidence, List<String> transcript) {
         String cleaned = evidence.trim();
         if (cleaned.isEmpty() || "-".equals(cleaned) || transcript.isEmpty()) {
-            return cleaned;
+            return null;
         }
 
         String normalized = cleaned.replaceAll("\\s+", "");
-        String best = cleaned;
-        int bestScore = 0;
-
         for (String line : transcript) {
             String candidate = line.replaceAll("\\s+", "");
-            int score = 0;
-            for (int i = 0; i + 2 <= normalized.length(); i += 1) {
-                if (candidate.contains(normalized.substring(i, i + 2))) {
-                    score += 1;
-                }
-            }
-            if (score > bestScore) {
-                bestScore = score;
-                best = line;
+            String withoutSpeaker = candidate.replaceFirst("^[A-Z]+:", "");
+            if (normalized.equals(candidate) || normalized.equals(withoutSpeaker)) {
+                return line;
             }
         }
-        return best;
+        return null;
     }
 }

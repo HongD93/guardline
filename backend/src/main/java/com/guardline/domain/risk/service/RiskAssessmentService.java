@@ -95,15 +95,37 @@ public class RiskAssessmentService {
             }
         }
         // 판정은 LLM 호출이라 오래 걸린다. 호출 스레드(WebSocket 종료 처리)를 막지 않는다.
-        scheduler.execute(() -> {
+        scheduler.execute(() -> finishAssessment(sessionId, state, onComplete, true));
+    }
+
+    private void finishAssessment(String sessionId, CallState state, Runnable onComplete, boolean mayWait) {
+        synchronized (state.assessmentLock) {
+            long retryAfter = llmGatewayClient.retryAfterMillis();
+            if (mayWait && retryAfter > 0) {
+                // 스케줄러 스레드를 sleep으로 점유하지 않는다. 다른 통화가 다시 429를
+                // 받더라도 한 번만 기다리므로 종료 대기가 무한히 늘어나지 않는다.
+                scheduler.schedule(() -> finishAssessment(sessionId, state, onComplete, false),
+                        Math.min(retryAfter, 30_000) + 50, TimeUnit.MILLISECONDS);
+                return;
+            }
+            boolean deferred = false;
             try {
                 assess(sessionId);
+                // 종료 시도 자체가 처음 429를 받을 수도 있다.
+                long newlyLimited = llmGatewayClient.retryAfterMillis();
+                if (mayWait && newlyLimited > 0) {
+                    scheduler.schedule(() -> finishAssessment(sessionId, state, onComplete, false),
+                            Math.min(newlyLimited, 30_000) + 50, TimeUnit.MILLISECONDS);
+                    deferred = true;
+                }
             } finally {
-                calls.remove(sessionId);
-                log.info("판정 세션 종료: {}", sessionId);
-                onComplete.run();
+                if (!deferred) {
+                    calls.remove(sessionId, state);
+                    log.info("판정 세션 종료: {}", sessionId);
+                    onComplete.run();
+                }
             }
-        });
+        }
     }
 
     private void assess(String sessionId) {
@@ -111,7 +133,17 @@ public class RiskAssessmentService {
         if (state == null) {
             return;
         }
+        // 종료 직전 주기 판정이 아직 응답을 기다릴 수 있다. 최종 판정이 먼저 끝나고
+        // 옛 결과가 뒤늦게 전송되지 않도록 통화별로 판정을 직렬화한다.
+        synchronized (state.assessmentLock) {
+            if (calls.get(sessionId) != state) {
+                return;
+            }
+            assessState(sessionId, state);
+        }
+    }
 
+    private void assessState(String sessionId, CallState state) {
         List<String> window;
         synchronized (state) {
             int from = Math.max(0, state.lines.size() - llmProperties.windowLines());
@@ -128,8 +160,16 @@ public class RiskAssessmentService {
 
         RiskAssessmentResponseDTO assessment;
         synchronized (state) {
+            // 감점은 새 대화에 의해 반박될 수 있다. 특히 안내 종결 뒤에 이체 요구가
+            // 추가되면 앞선 N4를 계속 유지해서는 안 된다.
+            state.negatives.clear();
+            state.evidences.keySet().removeIf(id -> id.startsWith("N"));
             merge(state, byRule);
-            merge(state, byLlm);
+            // 원문을 정확히 인용해도 모델이 안부 인사를 상의 권유로 오분류할 수 있다.
+            // 위험을 낮추는 근거는 명시적인 안내 문구가 확인된 규칙 결과만 사용한다.
+            // S3는 단독으로 위험 경고를 켜므로 시간 압박 같은 모델 오분류로 발동하지 않는다.
+            merge(state, new SignalDetectionResult(byLlm.stages().stream()
+                    .filter(signal -> !"S3".equals(signal.id())).toList(), List.of()));
             assessment = riskScorer.score(
                     Map.copyOf(state.stages),
                     Set.copyOf(state.negatives),
@@ -167,6 +207,7 @@ public class RiskAssessmentService {
     /** 통화 하나의 누적 상태. 접근은 인스턴스 락으로 직렬화한다. */
     private static final class CallState {
 
+        private final Object assessmentLock = new Object();
         private final boolean inbound;
         private final Consumer<RiskAssessmentResponseDTO> sink;
         private final List<String> lines = new ArrayList<>();

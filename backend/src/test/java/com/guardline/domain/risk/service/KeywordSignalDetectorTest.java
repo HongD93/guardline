@@ -13,6 +13,28 @@ import org.junit.jupiter.api.Test;
  */
 class KeywordSignalDetectorTest {
 
+    @Test
+    void 상의와_공식확인을_금지하는_말을_감점으로_처리하지_않는다() {
+        assertThat(negativeIds(List.of("가족과 상의하지 마세요", "대표번호로 전화하시면 안 됩니다")))
+                .doesNotContain("N1", "N2");
+    }
+
+    @Test
+    void 이체요구가_있으면_안내만_하고_끝났다고_감점하지_않는다() {
+        assertThat(negativeIds(List.of("안전계좌로 이체하세요", "추가로 진행하실 부분은 없습니다")))
+                .doesNotContain("N4");
+    }
+
+    @Test
+    void 대표번호를_언급만_하면_공식확인_유도로_보지_않는다() {
+        assertThat(negativeIds(List.of("이 번호가 대표번호입니다"))).doesNotContain("N2");
+    }
+
+    @Test
+    void 대표번호로_문의하라는_안내는_공식확인_유도다() {
+        assertThat(negativeIds(List.of("구청 대표번호로 문의주시면 됩니다"))).contains("N2");
+    }
+
     private final KeywordSignalDetector detector = new KeywordSignalDetector();
 
     private List<String> stageIds(List<String> lines) {

@@ -13,6 +13,7 @@ const STATUS_LABEL = {
   connecting: '연결 중',
   ready: '업스트림 준비됨',
   streaming: '스트리밍 중',
+  finalizing: '마지막 판정 중',
   closed: '종료됨',
   error: '오류',
 };
@@ -26,7 +27,7 @@ const STATUS_LABEL = {
         id="scenario"
         class="select"
         :value="props.selectedId"
-        :disabled="props.status === 'streaming' || props.status === 'connecting'"
+        :disabled="['streaming', 'connecting', 'ready', 'finalizing'].includes(props.status)"
         @change="emit('update:selectedId', $event.target.value)"
       >
         <option v-for="scenario in props.scenarios" :key="scenario.id" :value="scenario.id">
@@ -39,7 +40,7 @@ const STATUS_LABEL = {
       <button
         type="button"
         class="button primary"
-        :disabled="props.status === 'streaming' || props.status === 'connecting'"
+        :disabled="['streaming', 'connecting', 'ready', 'finalizing'].includes(props.status)"
         @click="emit('play')"
       >
         시나리오 재생
@@ -47,7 +48,7 @@ const STATUS_LABEL = {
       <button
         type="button"
         class="button"
-        :disabled="props.status === 'streaming' || props.status === 'connecting'"
+        :disabled="['streaming', 'connecting', 'ready', 'finalizing'].includes(props.status)"
         @click="emit('mic')"
       >
         마이크로 말하기

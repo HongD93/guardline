@@ -15,9 +15,9 @@ import org.springframework.stereotype.Component;
  * 말씀하시면 안 됩니다" 같은 문장은 판단이 필요 없는 고정 패턴인데 이걸 모델의 변덕에 맡길
  * 이유가 없다. 규칙은 신호를 추가만 하고 제거하지 않으며, LLM 결과와 합집합으로 병합된다.
  *
- * <p>대상 범위는 어휘만으로 확정할 수 있고, 잘못 잡아도 위험 쪽으로 튀지 않는 신호로 한정했다.
+ * <p>고정 문구를 우선 확인한다. 규칙도 오탐·누락이 가능하므로 반증 사례와 실제 전사를 검증한다.
  * <ul>
- *   <li>감점 신호(N1·N2·N4) - 오탐이 나도 안전 쪽으로 밀 뿐이라 위험을 놓치지 않는다.</li>
+ *   <li>감점 신호(N1·N2·N4) - 오탐이 위험을 숨길 수 있어 명시적인 안내와 부정 표현을 검사한다.</li>
  *   <li>S3(격리 유도) - 정상 통화에 거의 나오지 않는 고정밀 패턴이고 위험 등급 floor를
  *       트리거하는 제품의 핵심이다.</li>
  *   <li>S1(기관 사칭)·S2(공포 조성) - 정상 통화도 정당하게 밟는 단계다. 둘만으로는 체인
@@ -35,6 +35,10 @@ public class KeywordSignalDetector {
     private static final double RULE_CONFIDENCE = 0.95;
 
     private static final Map<String, List<Pattern>> RULES = new LinkedHashMap<>();
+    private static final Pattern NEGATIVE_DENIAL = compile(
+            "(상의|의논|확인|연락|전화|신청|조회).{0,12}(하지\\s*마|하시면\\s*안|하면\\s*안|금지|필요.{0,4}없)");
+    private static final Pattern INFORMATION_ONLY_EXCLUSION = compile(
+            "금전|계좌|이체|송금|입금|현금|앱\\s*설치|다운로드|개인정보|비밀번호|인증번호|카드번호|OTP");
 
     static {
         // S1·S2는 정상 통화도 정당하게 밟는 단계다. 규칙으로 잡아도 위험 쪽으로 튀지 않는 이유는
@@ -77,7 +81,7 @@ public class KeywordSignalDetector {
 
         RULES.put("N2", List.of(
                 compile("(공식)?\\s*(앱|홈페이지|어플)에서\\s*(직접)?\\s*(확인|신청|조회)"),
-                compile("대표\\s*번호"),
+                compile("대표\\s*번호.{0,20}(전화|연락|확인|문의|다시|재통화)"),
                 compile("(고객센터|콜센터)(로)?\\s*다시"),
                 compile("(비밀번호|카드번호|인증번호).{0,12}(여쭤|묻|물어).{0,16}없")
         ));
@@ -101,7 +105,11 @@ public class KeywordSignalDetector {
         List<SignalDetectionResult.Detected> negatives = new ArrayList<>();
 
         for (Map.Entry<String, List<Pattern>> rule : RULES.entrySet()) {
-            String matched = firstMatch(lines, rule.getValue());
+            if ("N4".equals(rule.getKey()) && lines.stream()
+                    .anyMatch(line -> INFORMATION_ONLY_EXCLUSION.matcher(line).find())) {
+                continue;
+            }
+            String matched = firstMatch(lines, rule.getValue(), rule.getKey().startsWith("N"));
             if (matched == null) {
                 continue;
             }
@@ -118,8 +126,11 @@ public class KeywordSignalDetector {
     }
 
     /** 가장 먼저 매칭되는 문장을 근거로 쓴다. 화면 하이라이트에 그대로 들어간다. */
-    private String firstMatch(List<String> lines, List<Pattern> patterns) {
+    private String firstMatch(List<String> lines, List<Pattern> patterns, boolean negative) {
         for (String line : lines) {
+            if (negative && NEGATIVE_DENIAL.matcher(line).find()) {
+                continue;
+            }
             for (Pattern pattern : patterns) {
                 if (pattern.matcher(line).find()) {
                     return line;
